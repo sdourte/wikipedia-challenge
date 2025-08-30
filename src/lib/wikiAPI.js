@@ -3,7 +3,11 @@ export async function getRandomWikiPage() {
   const res = await fetch('https://fr.wikipedia.org/api/rest_v1/page/random/summary')
   if (!res.ok) throw new Error('Erreur lors de la récupération de la page')
   const data = await res.json()
-  return { title: data.title }
+
+  return {
+    title: data.title,
+    url: `https://fr.wikipedia.org/wiki/${encodeURIComponent(data.title)}`
+  }
 }
 
 export async function getWikiPage(title) {

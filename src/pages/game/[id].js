@@ -1,8 +1,6 @@
-// src/pages/game/[id].js
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/router'
 import { supabase } from '../../lib/supabaseClient'
-import { getWikiPage } from '../../lib/wikiAPI'
 
 export default function GamePage() {
   const router = useRouter()
@@ -10,11 +8,9 @@ export default function GamePage() {
 
   const [game, setGame] = useState(null)
   const [player, setPlayer] = useState(null)
-  const [currentPage, setCurrentPage] = useState('')
-  const [pageHTML, setPageHTML] = useState('')
+  const [submittedUrl, setSubmittedUrl] = useState('')
   const [loading, setLoading] = useState(true)
 
-  // Charger la partie + un joueur (pour tester)
   useEffect(() => {
     if (!id) return
     const fetchGame = async () => {
@@ -24,10 +20,9 @@ export default function GamePage() {
           .select('*')
           .eq('id', id)
           .single()
-        if (gameError) throw gameError
+        if (gameError || !gameData) throw gameError
 
         setGame(gameData)
-        setCurrentPage(gameData.start_page)
 
         const { data: playerData } = await supabase
           .from('players')
@@ -46,97 +41,80 @@ export default function GamePage() {
     fetchGame()
   }, [id])
 
-  // Charger la page Wikipédia courante
-  useEffect(() => {
-    if (!currentPage) return
+  const startGame = async () => {
+    if (!game) return
+    try {
+      const now = new Date().toISOString()
+      const { error } = await supabase
+        .from('games')
+        .update({ start_time: now, started: true })
+        .eq('id', id)
+      if (error) throw error
 
-    const fetchPage = async () => {
-      try {
-        const html = await getWikiPage(currentPage)
-        // Retire toute balise <base> qui pourrait re-résoudre les liens hors de notre app
-        const sanitized = html.replace(/<base[^>]*>/gi, '')
-        setPageHTML(sanitized)
-      } catch (err) {
-        console.error('Erreur de chargement de la page Wikipédia :', err)
-      }
+      setGame({ ...game, start_time: now, started: true })
+      alert('La partie a commencé !')
+    } catch (err) {
+      console.error(err)
+      alert('Erreur lors du lancement de la partie')
     }
-    fetchPage()
-  }, [currentPage])
+  }
 
-  // Interception DÉLÉGUÉE en phase de capture sur le conteneur
-  useEffect(() => {
-    const container = document.getElementById('wiki-container')
-    // On scroll la page vers le haut en douceur
-    window.scrollTo({ top: 0, behavior: 'smooth' })
+  const handleValidate = async () => {
+    if (!submittedUrl || !game.started) return
 
-    if (!container) return
-
-    const handleContainerClick = async (e) => {
-      // On attrape le <a> le plus proche de la cible
-      const a = e.target.closest('a')
-      if (!a || !container.contains(a)) return
-
-      let href = a.getAttribute('href') || ''
-      if (!href) return
-
-      // Ignore les ancres internes/externes non pertinentes
-      if (/^(mailto:|tel:|javascript:)/i.test(href)) return
-
-      // Détecte si c’est un lien interne Wikipédia
-      // Cas possibles: "/wiki/Titre", "./Titre", "/w/index.php?title=Titre", "https://en.wikipedia.org/wiki/Titre"
-      let newTitle = null
-
-      if (href.startsWith('/wiki/')) {
-        newTitle = href.slice('/wiki/'.length)
-      } else if (href.startsWith('./')) {
-        newTitle = href.slice(2)
-      } else if (href.startsWith('/w/index.php')) {
-        try {
-          const url = new URL(href, 'https://en.wikipedia.org') // base nécessaire si href est relatif
-          const t = url.searchParams.get('title')
-          if (t) newTitle = t
-        } catch {}
-      } else if (/^https?:\/\/[^/]*wikipedia\.org\/wiki\//i.test(href)) {
-        newTitle = href.split('/wiki/')[1]
+    try {
+      // Fonction pour normaliser une URL Wikipédia
+      const normalizeWikiUrl = (url) => {
+        let u = decodeURIComponent(url.trim().toLowerCase())
+        // Retirer le préfixe Wikipédia si présent
+        u = u.replace(/^https?:\/\/fr\.wikipedia\.org\/wiki\//, '')
+        // Remplacer underscores par espaces
+        u = u.replace(/_/g, ' ')
+        // Supprimer les doubles espaces
+        u = u.replace(/\s+/g, ' ').trim()
+        return u
       }
 
-      if (!newTitle) return // On laisse passer les liens externes
+      const submitted = normalizeWikiUrl(submittedUrl)
+      const target = normalizeWikiUrl(game.target_page_url || '')
 
-      // Enlève éventuel fragment "#..."
-      newTitle = decodeURIComponent(newTitle.split('#')[0])
+      console.log('Normalized submitted:', submitted)
+      console.log('Normalized target   :', target)
 
-      // Empêche la navigation native AVANT tout
-      e.preventDefault()
-      e.stopPropagation()
-      if (typeof e.stopImmediatePropagation === 'function') {
-        e.stopImmediatePropagation()
-      }
-
-      // Met à jour l’état local (charge la nouvelle page)
-      setCurrentPage(newTitle)
-
-      // Sauvegarde la progression du joueur
-      if (player) {
-        try {
-          await supabase
-            .from('players')
-            .update({ current_page: newTitle })
-            .eq('id', player.id)
-        } catch (err) {
-          console.error('Erreur mise à jour joueur :', err)
+      if (submitted === target) {
+        const finishedAt = new Date()
+        let duration = null
+        if (game.start_time) {
+          const startTime = new Date(game.start_time) // UTC de Supabase
+          duration = Math.floor((finishedAt - startTime) / 1000)
         }
-      }
 
-      // Vérifie la victoire
-      if (game && newTitle === game.target_page) {
-        alert('🎉 Bravo ! Vous avez atteint la page cible.')
+        await supabase
+          .from('players')
+          .update({
+            finished_at: finishedAt.toISOString(),
+            time: duration,
+            current_url: submittedUrl,
+          })
+          .eq('id', player.id)
+
+        alert(`🎉 Bravo ! Vous avez trouvé la page cible en ${duration || '?'} secondes.`)
+        setPlayer((p) => ({
+          ...p,
+          finished_at: finishedAt,
+          time: duration,
+          current_url: submittedUrl,
+        }))
+      } else {
+        alert('❌ Mauvaise page, continue à chercher !')
+        console.log('Page soumise:', submittedUrl)
+        console.log('Page cible   :', game.target_page_url)
       }
+    } catch (err) {
+      console.error('Erreur lors de la validation :', err)
     }
+  }
 
-    // Phase de capture = true pour choper l’événement avant la navigation par défaut
-    container.addEventListener('click', handleContainerClick, true)
-    return () => container.removeEventListener('click', handleContainerClick, true)
-  }, [pageHTML, player, game])
 
   if (loading) return <div>Chargement...</div>
   if (!game) return <div>Partie introuvable</div>
@@ -144,21 +122,45 @@ export default function GamePage() {
   return (
     <div style={{ padding: '2rem' }}>
       <h1>Wikipedia Challenge</h1>
-      <h2>Page de départ : {game.start_page}</h2>
-      <h3>Page cible : {game.target_page}</h3>
-      {player ? <p>Joueur : {player.name}</p> : <p>Aucun joueur trouvé</p>}
 
-      <div
-        id="wiki-container"
-        dangerouslySetInnerHTML={{ __html: pageHTML }}
-        style={{
-          border: '1px solid #ccc',
-          padding: '1rem',
-          marginTop: '1rem',
-          maxHeight: '70vh',
-          overflowY: 'scroll'
-        }}
-      />
+      <h2>Page de départ :</h2>
+      <p>
+        <a href={game.start_page_url} target="_blank" rel="noopener noreferrer">
+          {game.start_page}
+        </a>
+      </p>
+
+      <h2>Page cible :</h2>
+      <p>{game.target_page}</p>
+
+      {!game.started && (
+        <button onClick={startGame} style={{ padding: '0.5rem 1rem', marginTop: '1rem' }}>
+          Lancer la partie
+        </button>
+      )}
+
+      {game.started ? (
+        player && !player.finished_at ? (
+          <div style={{ marginTop: '2rem' }}>
+            <input
+              type="text"
+              placeholder="Collez ici l’URL Wikipédia trouvée"
+              value={submittedUrl}
+              onChange={(e) => setSubmittedUrl(e.target.value)}
+              style={{ width: '100%', padding: '0.5rem', marginBottom: '1rem' }}
+            />
+            <button onClick={handleValidate} style={{ padding: '0.5rem 1rem' }}>
+              Valider
+            </button>
+          </div>
+        ) : player ? (
+          <p>✅ Vous avez terminé en {player.time || '?'} secondes.</p>
+        ) : (
+          <p>Aucun joueur trouvé</p>
+        )
+      ) : (
+        <p>⏳ La partie n’a pas encore commencé. Attendez que le créateur lance la partie.</p>
+      )}
     </div>
   )
 }
