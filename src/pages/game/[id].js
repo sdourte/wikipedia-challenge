@@ -115,6 +115,14 @@ export default function GamePage() {
     }
   }
 
+  // Formate une durée en secondes en une chaîne lisible
+  const formatDuration = (seconds) => {
+    if (!seconds) return '?'
+    if (seconds < 60) return `${seconds} s`
+    const mins = Math.floor(seconds / 60)
+    const secs = seconds % 60
+    return secs === 0 ? `${mins} min` : `${mins} min ${secs} s`
+  }
 
   if (loading) return <div>Chargement...</div>
   if (!game) return <div>Partie introuvable</div>
@@ -154,7 +162,7 @@ export default function GamePage() {
             </button>
           </div>
         ) : player ? (
-          <p>✅ Vous avez terminé en {player.time || '?'} secondes.</p>
+          <p>✅ Vous avez terminé en {formatDuration(player.time)}.</p>
         ) : (
           <p>Aucun joueur trouvé</p>
         )
