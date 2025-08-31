@@ -18,7 +18,13 @@ export default function Waiting() {
   const [errorMsg, setErrorMsg] = useState('')
 
   // Liste de thèmes pour le mode "Mot-clé"
-  const themes = ["Auteur", "Pays", "Animal", "Histoire", "Technologie", "Sport", "Musique", "Cinéma"]
+    const themes = [
+    "Auteur", "Pays", "Animal", "Histoire", "Technologie", "Sport", "Musique", "Cinéma",
+    "Art", "Science", "Invention", "Philosophie", "Littérature", "Cuisine", "Mode",
+    "Nature", "Mythologie", "Géographie", "Politique", "Économie", "Éducation",
+    "Télévision", "Jeux vidéo", "Architecture", "Religion", "Astronomie", "Chimie",
+    "Physique", "Biologie", "Psychologie", "Transport", "Événement", "Festival"
+    ]
 
   useEffect(() => {
     const init = async () => {
