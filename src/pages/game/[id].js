@@ -1,174 +1,107 @@
-import { useState, useEffect } from 'react'
+// src/pages/game/[id].js
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/router'
 import { supabase } from '../../lib/supabaseClient'
 
-export default function GamePage() {
+export default function Game() {
   const router = useRouter()
-  const { id } = router.query
-
+  const { id: gameId } = router.query
   const [game, setGame] = useState(null)
-  const [player, setPlayer] = useState(null)
-  const [submittedUrl, setSubmittedUrl] = useState('')
-  const [loading, setLoading] = useState(true)
+  const [userId, setUserId] = useState(null)
+  const [startTime, setStartTime] = useState(null)
+  const [inputUrl, setInputUrl] = useState('')
+  const [feedback, setFeedback] = useState(null)
 
   useEffect(() => {
-    if (!id) return
-    const fetchGame = async () => {
-      try {
-        const { data: gameData, error: gameError } = await supabase
-          .from('games')
-          .select('*')
-          .eq('id', id)
-          .single()
-        if (gameError || !gameData) throw gameError
-
-        setGame(gameData)
-
-        const { data: playerData } = await supabase
-          .from('players')
-          .select('*')
-          .eq('game_id', id)
-          .limit(1)
-          .single()
-        if (playerData) setPlayer(playerData)
-
-        setLoading(false)
-      } catch (err) {
-        console.error(err)
-        setLoading(false)
+    const init = async () => {
+      if (!gameId) return
+      const uid = localStorage.getItem('playerId')
+      if (!uid) {
+        alert('Retour à l’accueil')
+        router.push('/')
+        return
       }
-    }
-    fetchGame()
-  }, [id])
+      setUserId(uid)
 
-  const startGame = async () => {
-    if (!game) return
-    try {
-      const now = new Date().toISOString()
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from('games')
-        .update({ start_time: now, started: true })
-        .eq('id', id)
-      if (error) throw error
-
-      setGame({ ...game, start_time: now, started: true })
-      alert('La partie a commencé !')
-    } catch (err) {
-      console.error(err)
-      alert('Erreur lors du lancement de la partie')
+        .select('*')
+        .eq('id', gameId)
+        .single()
+      if (error) {
+        console.error(error)
+        return
+      }
+      setGame(data)
+      setStartTime(Date.now())
     }
+    init()
+  }, [gameId])
+
+  const normalize = str => decodeURIComponent(str).replace(/_/g, ' ').toLowerCase()
+  const extractTitleFromUrl = url => {
+    const match = url.match(/\/wiki\/(.+)/)
+    if (!match) return url
+    return decodeURIComponent(match[1]).replace(/_/g, ' ')
   }
 
   const handleValidate = async () => {
-    if (!submittedUrl || !game.started) return
+    if (!game || !userId || !startTime) return
 
-    try {
-      // Fonction pour normaliser une URL Wikipédia
-      const normalizeWikiUrl = (url) => {
-        let u = decodeURIComponent(url.trim().toLowerCase())
-        // Retirer le préfixe Wikipédia si présent
-        u = u.replace(/^https?:\/\/fr\.wikipedia\.org\/wiki\//, '')
-        // Remplacer underscores par espaces
-        u = u.replace(/_/g, ' ')
-        // Supprimer les doubles espaces
-        u = u.replace(/\s+/g, ' ').trim()
-        return u
-      }
+    const wikiMatch = inputUrl.match(/\/wiki\/(.+)/)
+    if (!wikiMatch) {
+      setFeedback('URL invalide : doit contenir /wiki/...')
+      return
+    }
 
-      const submitted = normalizeWikiUrl(submittedUrl)
-      const target = normalizeWikiUrl(game.target_page_url || '')
+    const pageId = normalize(wikiMatch[1])
+    const targetPageId = normalize(game.page_end_title || extractTitleFromUrl(game.page_end))
 
-      console.log('Normalized submitted:', submitted)
-      console.log('Normalized target   :', target)
+    if (pageId !== targetPageId) {
+      setFeedback('Mauvaise page, essayez encore !')
+      return
+    }
 
-      if (submitted === target) {
-        const finishedAt = new Date()
-        let duration = null
-        if (game.start_time) {
-          const startTime = new Date(game.start_time) // UTC de Supabase
-          duration = Math.floor((finishedAt - startTime) / 1000)
-        }
+    const timeTaken = Math.floor((Date.now() - startTime) / 1000)
+    const { data, error } = await supabase
+      .from('game_players')
+      .update({ finished: true, time_taken: timeTaken })
+      .eq('game_id', gameId)
+      .eq('user_id', userId)
+      .select()
 
-        await supabase
-          .from('players')
-          .update({
-            finished_at: finishedAt.toISOString(),
-            time: duration,
-            current_url: submittedUrl,
-          })
-          .eq('id', player.id)
-
-        alert(`🎉 Bravo ! Vous avez trouvé la page cible en ${duration || '?'} secondes.`)
-        setPlayer((p) => ({
-          ...p,
-          finished_at: finishedAt,
-          time: duration,
-          current_url: submittedUrl,
-        }))
-      } else {
-        alert('❌ Mauvaise page, continue à chercher !')
-        console.log('Page soumise:', submittedUrl)
-        console.log('Page cible   :', game.target_page_url)
-      }
-    } catch (err) {
-      console.error('Erreur lors de la validation :', err)
+    if (error) {
+      console.error('[GAME VALIDATE] Erreur update joueur:', error)
+      setFeedback('Erreur lors de l’enregistrement du score.')
+    } else {
+      router.push(`/ranking/${gameId}`)
     }
   }
 
-  // Formate une durée en secondes en une chaîne lisible
-  const formatDuration = (seconds) => {
-    if (!seconds) return '?'
-    if (seconds < 60) return `${seconds} s`
-    const mins = Math.floor(seconds / 60)
-    const secs = seconds % 60
-    return secs === 0 ? `${mins} min` : `${mins} min ${secs} s`
-  }
-
-  if (loading) return <div>Chargement...</div>
-  if (!game) return <div>Partie introuvable</div>
+  if (!game) return <p>Chargement...</p>
 
   return (
-    <div style={{ padding: '2rem' }}>
+    <div style={{ display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',minHeight:'100vh' }}>
       <h1>Wikipedia Challenge</h1>
+      <p>Départ : <a href={game.page_start} target="_blank" rel="noreferrer">{game.page_start_title || extractTitleFromUrl(game.page_start)}</a></p>
+      <p>Arrivée : {game.page_end_title || extractTitleFromUrl(game.page_end)}</p>
 
-      <h2>Page de départ :</h2>
-      <p>
-        <a href={game.start_page_url} target="_blank" rel="noopener noreferrer">
-          {game.start_page}
-        </a>
-      </p>
+      <input
+        type="text"
+        value={inputUrl}
+        onChange={e => setInputUrl(e.target.value)}
+        placeholder="Collez ici l’URL de la page finale"
+        style={{ marginTop:'2rem', padding:'0.5rem', width:'300px' }}
+      />
 
-      <h2>Page cible :</h2>
-      <p>{game.target_page}</p>
+      <button
+        onClick={handleValidate}
+        style={{ marginTop:'1rem', padding:'1rem 2rem', backgroundColor:'#10B981', color:'white', borderRadius:'0.5rem' }}
+      >
+        Valider
+      </button>
 
-      {!game.started && (
-        <button onClick={startGame} style={{ padding: '0.5rem 1rem', marginTop: '1rem' }}>
-          Lancer la partie
-        </button>
-      )}
-
-      {game.started ? (
-        player && !player.finished_at ? (
-          <div style={{ marginTop: '2rem' }}>
-            <input
-              type="text"
-              placeholder="Collez ici l’URL Wikipédia trouvée"
-              value={submittedUrl}
-              onChange={(e) => setSubmittedUrl(e.target.value)}
-              style={{ width: '100%', padding: '0.5rem', marginBottom: '1rem' }}
-            />
-            <button onClick={handleValidate} style={{ padding: '0.5rem 1rem' }}>
-              Valider
-            </button>
-          </div>
-        ) : player ? (
-          <p>✅ Vous avez terminé en {formatDuration(player.time)}.</p>
-        ) : (
-          <p>Aucun joueur trouvé</p>
-        )
-      ) : (
-        <p>⏳ La partie n’a pas encore commencé. Attendez que le créateur lance la partie.</p>
-      )}
+      {feedback && <p style={{ marginTop:'1rem', color: feedback.includes('correct') ? 'green' : 'red' }}>{feedback}</p>}
     </div>
   )
 }
