@@ -7,8 +7,10 @@ export default function Game() {
   const router = useRouter()
   const { id: gameId } = router.query
   const [game, setGame] = useState(null)
-  const [startTime, setStartTime] = useState(null)
   const [userId, setUserId] = useState(null)
+  const [startTime, setStartTime] = useState(null)
+  const [inputUrl, setInputUrl] = useState('')
+  const [feedback, setFeedback] = useState(null)
 
   useEffect(() => {
     const init = async () => {
@@ -36,16 +38,41 @@ export default function Game() {
     init()
   }, [gameId])
 
-  const handleValidate = async () => {
-    const timeTaken = Math.floor((Date.now() - startTime) / 1000)
+  const normalize = str => decodeURIComponent(str).replace(/_/g, ' ').toLowerCase()
 
-    await supabase
+  const handleValidate = async () => {
+    if (!game || !userId || !startTime) return
+
+    // 🔹 Vérifie l’URL
+    const wikiMatch = inputUrl.match(/\/wiki\/(.+)/)
+    if (!wikiMatch) {
+      setFeedback('URL invalide : doit contenir /wiki/...')
+      return
+    }
+
+    const pageId = normalize(wikiMatch[1])
+    const targetPageId = normalize(game.page_end.split('/wiki/')[1])
+
+    if (pageId !== targetPageId) {
+      setFeedback('Mauvaise page, essayez encore !')
+      return
+    }
+
+    // 🔹 URL correcte → update temps et marque le joueur comme fini
+    const timeTaken = Math.floor((Date.now() - startTime) / 1000)
+    const { data, error } = await supabase
       .from('game_players')
       .update({ finished: true, time_taken: timeTaken })
       .eq('game_id', gameId)
       .eq('user_id', userId)
+      .select()
 
-    router.push(`/ranking/${gameId}`) // après validation → classement
+    if (error) {
+      console.error('[GAME VALIDATE] Erreur update joueur:', error)
+      setFeedback('Erreur lors de l’enregistrement du score.')
+    } else {
+      router.push(`/ranking/${gameId}`)
+    }
   }
 
   if (!game) return <p>Chargement...</p>
@@ -55,12 +82,23 @@ export default function Game() {
       <h1>Wikipedia Challenge</h1>
       <p>Départ : <a href={game.page_start} target="_blank" rel="noreferrer">{game.page_start}</a></p>
       <p>Arrivée : {game.page_end}</p>
+
+      <input
+        type="text"
+        value={inputUrl}
+        onChange={e => setInputUrl(e.target.value)}
+        placeholder="Collez ici l’URL de la page finale"
+        style={{ marginTop:'2rem', padding:'0.5rem', width:'300px' }}
+      />
+
       <button
         onClick={handleValidate}
-        style={{ marginTop:'2rem', padding:'1rem 2rem', backgroundColor:'#10B981', color:'white', borderRadius:'0.5rem' }}
+        style={{ marginTop:'1rem', padding:'1rem 2rem', backgroundColor:'#10B981', color:'white', borderRadius:'0.5rem' }}
       >
-        J’ai trouvé !
+        Valider
       </button>
+
+      {feedback && <p style={{ marginTop:'1rem', color: feedback.includes('correct') ? 'green' : 'red' }}>{feedback}</p>}
     </div>
   )
 }
