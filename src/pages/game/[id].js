@@ -39,11 +39,15 @@ export default function Game() {
   }, [gameId])
 
   const normalize = str => decodeURIComponent(str).replace(/_/g, ' ').toLowerCase()
+  const extractTitleFromUrl = url => {
+    const match = url.match(/\/wiki\/(.+)/)
+    if (!match) return url
+    return decodeURIComponent(match[1]).replace(/_/g, ' ')
+  }
 
   const handleValidate = async () => {
     if (!game || !userId || !startTime) return
 
-    // 🔹 Vérifie l’URL
     const wikiMatch = inputUrl.match(/\/wiki\/(.+)/)
     if (!wikiMatch) {
       setFeedback('URL invalide : doit contenir /wiki/...')
@@ -51,14 +55,13 @@ export default function Game() {
     }
 
     const pageId = normalize(wikiMatch[1])
-    const targetPageId = normalize(game.page_end.split('/wiki/')[1])
+    const targetPageId = normalize(game.page_end_title || extractTitleFromUrl(game.page_end))
 
     if (pageId !== targetPageId) {
       setFeedback('Mauvaise page, essayez encore !')
       return
     }
 
-    // 🔹 URL correcte → update temps et marque le joueur comme fini
     const timeTaken = Math.floor((Date.now() - startTime) / 1000)
     const { data, error } = await supabase
       .from('game_players')
@@ -80,8 +83,8 @@ export default function Game() {
   return (
     <div style={{ display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',minHeight:'100vh' }}>
       <h1>Wikipedia Challenge</h1>
-      <p>Départ : <a href={game.page_start} target="_blank" rel="noreferrer">{game.page_start}</a></p>
-      <p>Arrivée : {game.page_end}</p>
+      <p>Départ : <a href={game.page_start} target="_blank" rel="noreferrer">{game.page_start_title || extractTitleFromUrl(game.page_start)}</a></p>
+      <p>Arrivée : {game.page_end_title || extractTitleFromUrl(game.page_end)}</p>
 
       <input
         type="text"

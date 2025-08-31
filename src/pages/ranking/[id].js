@@ -76,8 +76,8 @@ export default function Ranking() {
 
       {game && (
         <div style={{ marginBottom: '2rem' }}>
-          <p>Départ : {game.page_start}</p>
-          <p>Arrivée : {game.page_end}</p>
+          <p>Départ : {game.page_start_title}</p>
+          <p>Arrivée : {game.page_end_title}</p>
         </div>
       )}
 
